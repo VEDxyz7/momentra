@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  PHOTOGRAPHER
+  CLUB_MEMBER
+  VIEWER
+}
+
+enum AlbumVisibility {
+  PUBLIC
+  PRIVATE
+  CLUB_ONLY
+}
+
+enum MediaType {
+  PHOTO
+  VIDEO
+}
+
+model User {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  passwordHash String?
+  avatarUrl    String?
+  role         Role           @default(VIEWER)
+  createdAt    DateTime       @default(now())
+  uploads      MediaAsset[]    @relation("Uploader")
+  comments     Comment[]
+  likes        Like[]
+  favourites   Favourite[]
+  tags         FaceTag[]
+  events       EventMember[]
+  notifications Notification[]
+  refreshTokens RefreshToken[]
+  shares       ShareLink[]
+}
+
+model Event {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  description String
+  date        DateTime
+  category    String
+  coverUrl    String
+  clubName    String
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  albums      Album[]
+  members     EventMember[]
+}
+
+model Album {
+  id          String          @id @default(cuid())
+  eventId     String
+  event       Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  title       String
+  visibility  AlbumVisibility @default(PRIVATE)
+  qrToken     String          @unique
+  createdAt   DateTime        @default(now())
+  media       MediaAsset[]
+  shares      ShareLink[]
+}
+
+model MediaAsset {
+  id             String      @id @default(cuid())
+  albumId        String
+  album          Album       @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  uploaderId     String
+  uploader       User        @relation("Uploader", fields: [uploaderId], references: [id])
+  type           MediaType
+  originalKey    String
+  optimizedKey   String
+  thumbnailKey   String
+  width          Int?
+  height         Int?
+  durationSec    Int?
+  perceptualHash String?
+  aiCaption      String?
+  moderation     Json?
+  exif           Json?
+  uploadedAt     DateTime    @default(now())
+  tags           MediaTag[]
+  faceTags       FaceTag[]
+  embeddings     AIEmbedding[]
+  comments       Comment[]
+  likes          Like[]
+  favourites     Favourite[]
+}
+
+model AIEmbedding {
+  id        String     @id @default(cuid())
+  mediaId   String
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  provider  String
+  kind      String
+  vectorRef String
+  metadata  Json?
+  createdAt DateTime   @default(now())
+
+  @@index([kind])
+  @@index([provider])
+}
+
+model MediaTag {
+  id      String     @id @default(cuid())
+  label   String
+  score   Float
+  mediaId String
+  media   MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@index([label])
+}
+
+model FaceTag {
+  id           String     @id @default(cuid())
+  mediaId      String
+  media        MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?      @relation(fields: [userId], references: [id])
+  faceVectorId String
+  confidence   Float
+  box          Json
+}
+
+model Comment {
+  id        String     @id @default(cuid())
+  body      String
+  mediaId   String
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  createdAt DateTime   @default(now())
+}
+
+model Like {
+  id        String     @id @default(cuid())
+  mediaId   String
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  createdAt DateTime   @default(now())
+
+  @@unique([mediaId, userId])
+}
+
+model Favourite {
+  id        String     @id @default(cuid())
+  mediaId   String
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  createdAt DateTime   @default(now())
+
+  @@unique([mediaId, userId])
+}
+
+model EventMember {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role    Role
+
+  @@unique([eventId, userId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  payload   Json
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+}
+
+model ShareLink {
+  id          String   @id @default(cuid())
+  albumId     String
+  album       Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  token       String   @unique
+  privacy     String
+  expiresAt   DateTime
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([albumId])
+  @@index([expiresAt])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}

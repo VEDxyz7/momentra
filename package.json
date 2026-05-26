@@ -1,0 +1,48 @@
+{
+  "name": "event-media-management-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "dev:api": "node server/src/index.js",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "lint": "eslint .",
+    "server:dev": "node server/src/index.js",
+    "seed": "node server/src/seed.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "typescript": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest",
+    "lucide-react": "latest",
+    "framer-motion": "latest",
+    "qrcode.react": "latest",
+    "zustand": "latest",
+    "express": "latest",
+    "cors": "latest",
+    "helmet": "latest",
+    "compression": "latest",
+    "morgan": "latest",
+    "multer": "latest",
+    "express-rate-limit": "latest",
+    "socket.io": "latest",
+    "socket.io-client": "latest",
+    "zod": "latest",
+    "jsonwebtoken": "latest",
+    "bcryptjs": "latest",
+    "@prisma/client": "6.19.3"
+  },
+  "devDependencies": {
+    "eslint": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/express": "latest",
+    "@types/jsonwebtoken": "latest",
+    "prisma": "6.19.3"
+  }
+}

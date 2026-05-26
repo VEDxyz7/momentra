@@ -1,0 +1,10 @@
+{
+  "name": "Momentra",
+  "short_name": "Momentra",
+  "description": "Event and media management platform for campus communities.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0e11",
+  "theme_color": "#78f4cf",
+  "icons": []
+}
