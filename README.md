@@ -1,117 +1,341 @@
 # Momentra
 
-A modern Event & Media Management Platform for clubs, societies, and college communities. It combines event management, Google Photos-style galleries, Instagram-like social interactions, Drive-grade storage architecture, and AI-powered discovery.
+Momentra is an AI-powered Event & Media Management Platform designed for clubs, societies, student organizations, photographers, and event teams. It provides a centralized system for managing events, organizing media, enabling social interactions, and discovering content through AI-powered search and facial recognition.
 
-The project is now a functional full-stack local SaaS implementation: React routed frontend, Express API, JWT/RBAC auth, persistent local database, upload storage, Socket.IO realtime updates, share links, comments, likes, favourites, AI search, storage analytics, and deployment artifacts.
+## Overview
 
-## What Is Included
+Organizations frequently generate large volumes of photos and videos during events such as workshops, hackathons, cultural festivals, conferences, competitions, and trips. Media often becomes fragmented across multiple storage systems, making organization and retrieval difficult.
 
-- Premium responsive React frontend with route-backed Dashboard, Albums, Uploads, AI Search, Access, and Storage pages.
-- Event creation modal that persists events and automatically creates albums.
-- Drag-and-drop upload studio with bulk queue, retry/pause UX, stored metadata, and realtime AI processing completion.
-- Masonry gallery with lazy images, lightbox, fullscreen affordance, comments, nested replies-ready data model, likes, saves, share, tags, metadata, and watermarked downloads.
-- JWT authentication, refresh-token endpoint, password-reset token endpoint, protected APIs, and RBAC middleware.
-- Admin access page for role changes, bans, moderation-ready permissions, and protected user management APIs.
-- Smart tagging, AI captions, duplicate scoring, moderation status, semantic search, and Find My Photos face-search endpoint.
-- QR sharing with expiration, notification center, Socket.IO realtime sync, dark/light mode, analytics, PWA service worker, and storage health panel.
-- Prisma PostgreSQL schema, local persistent JSON database for immediate demo, Docker Compose for PostgreSQL/Redis, CI pipeline, API docs, architecture diagram, and pitch deck structure.
+Momentra addresses this problem through:
 
-## Run Locally
+- Event-based media organization
+- Secure access control
+- Social engagement features
+- AI-powered discovery
+- Cloud-based storage architecture
+- Personalized photo retrieval
 
-```bash
-npm install
-npm run seed
-npm run server:dev
-npm run dev
-```
+---
 
-Open the Vite URL shown in the terminal, usually `http://localhost:5173`. If that port is occupied, Vite will print the next available URL.
+## Features
 
-Demo login:
+### Event Management
 
-- `admin@momentra.app`
-- `photo@momentra.app`
-- `member@momentra.app`
-- `viewer@momentra.app`
-- Password for all: `momentra123`
+- Create, edit, and delete events
+- Event metadata management
+- Event categorization
+- Event-wise album generation
+- Sorting and filtering
 
-## Folder Structure
+### Media Management
+
+- Image and video uploads
+- Bulk uploads
+- Drag-and-drop support
+- Media previews
+- Upload progress tracking
+- Optimized media storage
+
+### Authentication and Access Control
+
+Role-based access control for:
+
+- Admin
+- Photographer
+- Club Member
+- Viewer
+
+Features include:
+
+- Authentication
+- Session management
+- Protected routes
+- Public and private media access
+
+### Social Features
+
+- Likes
+- Comments
+- Favorites
+- Sharing
+- User tagging
+- Download functionality
+- Real-time notifications
+
+### AI Features
+
+#### Smart Image Tagging
+
+Automatic tag generation for uploaded media.
+
+#### Advanced Search
+
+Search by:
+
+- Event Name
+- Tags
+- Upload Date
+- User Name
+
+#### Facial Recognition
+
+Users can:
+
+1. Upload a reference selfie
+2. Detect matching photos
+3. View personalized galleries
+
+### Cloud Storage
+
+- AWS S3 integration
+- CloudFront CDN delivery
+- Secure file access
+- Scalable media storage
+
+### Watermarking
+
+Dynamic watermark generation during downloads using:
+
+- Club Name
+- Event Name
+- User Role
+
+### Analytics
+
+- Event statistics
+- Upload metrics
+- Storage utilization
+- User engagement insights
+
+---
+
+## Technology Stack
+
+### Frontend
+
+- React
+- Vite
+- React Router
+
+### Backend
+
+- Node.js
+- Express.js
+
+### Database
+
+- PostgreSQL
+- Prisma ORM
+
+### Authentication
+
+- JWT
+- Refresh Tokens
+
+### Cloud Services
+
+- AWS S3
+- CloudFront
+
+### Real-Time Communication
+
+- Socket.IO
+
+### AI and Machine Learning
+
+- AWS Rekognition
+- OpenCV
+- TensorFlow
+- Face API
+
+---
+
+## System Architecture
 
 ```text
-.
+Frontend (React/Vite)
+        |
+        v
+Express API Server
+        |
+  +-----+-----+
+  |     |     |
+  v     v     v
+PostgreSQL  S3  Redis
+        |
+        v
+AI Processing Services
+```
+
+---
+
+## Project Structure
+
+```text
+Momentra/
+│
 ├── docs/
 │   ├── API.md
 │   ├── ARCHITECTURE.md
 │   └── PITCH_DECK.md
+│
 ├── prisma/
 │   └── schema.prisma
+│
 ├── server/
 │   └── src/
-│       ├── auth.js
-│       ├── db.js
-│       ├── modules/
-│       ├── realtime.js
-│       └── routes/
+│       ├── middleware/
+│       ├── services/
+│       ├── routes/
+│       ├── controllers/
+│       └── index.js
+│
 ├── src/
-│   ├── data/
+│   ├── components/
+│   ├── pages/
+│   ├── hooks/
+│   ├── contexts/
+│   ├── services/
 │   ├── styles/
 │   └── main.jsx
-├── index.html
-└── package.json
+│
+├── tests/
+│
+├── package.json
+└── README.md
 ```
 
-## Functional API Surface
-
-- Auth: `/api/auth/signup`, `/api/auth/login`, `/api/auth/refresh`, `/api/auth/password-reset`, `/api/me`
-- Events: `/api/events`, create/update events, auto-create albums
-- Albums: `/api/albums`, create/edit/delete, visibility, collaboration
-- Media: `/api/media`, `/api/uploads`, likes, favourites, comments, tags, trash, restore, downloads
-- AI: `/api/ai/search`, `/api/ai/find-my-photos`
-- Social/realtime: `/api/notifications`, Socket.IO events for uploads, comments, likes, tags, albums, users
-- Admin/storage: `/api/users`, `/api/storage`
-
-## Demo Roles
-
-- **Admin:** create events, publish albums, manage privacy, moderate AI, download originals.
-- **Photographer:** upload media, tag people, view assigned private shoots, download own media.
-- **Club Member:** like, comment, save favourites, use Find My Photos.
-- **Viewer:** view public albums, share public links, download watermarked media.
-
-## Production Backend Plan
-
-- **Auth:** JWT access tokens with HTTP-only refresh token rotation, OAuth via Clerk/Firebase/Auth.js if preferred.
-- **Database:** PostgreSQL with Prisma schema in `prisma/schema.prisma`.
-- **Storage:** S3 signed uploads, CloudFront CDN, separate original/optimized/thumbnail keys.
-- **Processing:** Queue-driven workers for compression, thumbnails, duplicate hashes, watermark derivatives, AI tagging, and face indexing.
-- **Realtime:** Socket.IO or Firebase for likes, comments, tags, upload completion, and album-ready notifications.
-- **AI:** AWS Rekognition for labels and face collections, face-api.js/OpenCV fallback, perceptual hashing for duplicates, moderation labels for unsafe content.
-- **Deployment:** Vercel for frontend, AWS ECS/Lambda for API/workers, RDS PostgreSQL, S3, CloudFront, Redis queue.
+---
 
 ## Environment Variables
 
-```bash
-DATABASE_URL="postgresql://user:pass@localhost:5432/momentra"
-JWT_SECRET="replace-me"
-WEB_ORIGIN="http://localhost:5173"
-AWS_REGION="ap-south-1"
-S3_BUCKET_ORIGINALS="momentra-originals"
-S3_BUCKET_DERIVATIVES="momentra-derivatives"
-CLOUDFRONT_URL="https://cdn.example.com"
+Create a `.env` file:
+
+```env
+DATABASE_URL=postgresql://user:password@localhost:5432/momentra
+
+JWT_SECRET=your_jwt_secret
+
+PORT=5000
+
+AWS_REGION=ap-south-1
+
+AWS_ACCESS_KEY_ID=your_access_key
+
+AWS_SECRET_ACCESS_KEY=your_secret_key
+
+S3_BUCKET_ORIGINALS=momentra-originals
+
+S3_BUCKET_DERIVATIVES=momentra-derivatives
+
+CLOUDFRONT_URL=https://your-cloudfront-url
+
+CLIENT_URL=http://localhost:5173
 ```
 
-## Demo Deployment Setup
+---
+
+## Installation
+
+### Clone Repository
 
 ```bash
-npm run build
-npm run preview
+git clone https://github.com/VEDxyz7/momentra.git
+cd momentra
 ```
 
-For Vercel, set the build command to `npm run build` and output directory to `dist`.
+### Install Dependencies
 
-Docker stack:
+Frontend:
 
 ```bash
-docker compose up --build
+npm install
 ```
 
-The current local runtime uses `server/data/db.json` for persistence so judges can run it instantly without provisioning PostgreSQL. The Prisma schema and Docker Compose services are included for production migration to PostgreSQL and Redis queues.
+Backend:
+
+```bash
+cd server
+npm install
+```
+
+### Database Setup
+
+```bash
+npx prisma generate
+npx prisma migrate dev
+```
+
+### Start Frontend
+
+```bash
+npm run dev
+```
+
+### Start Backend
+
+```bash
+npm run server:dev
+```
+
+Frontend:
+
+```text
+http://localhost:5173
+```
+
+Backend:
+
+```text
+http://localhost:5000
+```
+
+---
+
+## Testing
+
+Run tests:
+
+```bash
+npm test
+```
+
+or
+
+```bash
+npm run test
+```
+
+Test coverage includes:
+
+- Authentication
+- Events
+- Albums
+- Uploads
+- Search
+- Permissions
+- Notifications
+
+---
+
+## Security
+
+- JWT-based authentication
+- Role-based authorization
+- Secure file uploads
+- Signed URLs
+- Input validation
+- Protected APIs
+- Session management
+
+---
+
+## Future Enhancements
+
+- Mobile application
+- AI-generated event highlights
+- OCR-based image search
+- Voice-based search
+- Multi-club collaboration
+- Event recommendation engine
+- Video summarization
