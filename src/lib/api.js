@@ -18,7 +18,7 @@ export class ApiClient {
   }
 
   setSession(session) {
-    this.token = session.token;
+    this.token = session.token ?? session.accessToken;
     this.refreshToken = session.refreshToken ?? this.refreshToken;
     localStorage.setItem("momentra_token", this.token);
     if (this.refreshToken) localStorage.setItem("momentra_refresh", this.refreshToken);
@@ -31,11 +31,34 @@ export class ApiClient {
     localStorage.removeItem("momentra_refresh");
   }
 
-  async request(path, options = {}) {
+  async refreshSession() {
+    if (!this.refreshToken) return false;
+    try {
+      const response = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: this.refreshToken })
+      });
+      if (!response.ok) throw new Error("refresh failed");
+      const session = await response.json();
+      this.setSession(session);
+      return true;
+    } catch {
+      this.clearSession();
+      return false;
+    }
+  }
+
+  async request(path, options = {}, retry = true) {
     const headers = new Headers(options.headers ?? {});
     if (!(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
     if (this.token) headers.set("Authorization", `Bearer ${this.token}`);
-    const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+    let response;
+    try {
+      response = await fetch(`${API_URL}${path}`, { ...options, headers });
+    } catch {
+      throw new Error("Authentication service not running. Start the backend with npm run server:dev.");
+    }
     if (!response.ok) {
       let payload;
       try {
@@ -43,6 +66,10 @@ export class ApiClient {
       } catch {
         payload = { error: response.statusText };
       }
+      if (response.status === 401 && retry && path !== "/api/auth/refresh" && await this.refreshSession()) {
+        return this.request(path, options, false);
+      }
+      if (response.status === 401) this.clearSession();
       throw new Error(payload.error ?? "Request failed");
     }
     if (response.status === 204) return null;

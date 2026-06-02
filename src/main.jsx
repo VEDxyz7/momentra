@@ -77,6 +77,7 @@ function AppShell() {
   const [lightbox, setLightbox] = useState(null);
   const [shareModal, setShareModal] = useState(null);
   const [createEventOpen, setCreateEventOpen] = useState(false);
+  const [editEvent, setEditEvent] = useState(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const location = useLocation();
@@ -102,22 +103,27 @@ function AppShell() {
 
   useEffect(() => {
     async function bootstrap() {
-      if (!api.token) {
-        try {
+      try {
+        if (api.token) {
+          const me = await api.get("/api/me");
+          setSession(me.user);
+        }
+        if (!api.token) {
           const login = await api.post("/api/auth/login", { email: "admin@momentra.app", password: "momentra123" });
           api.setSession(login);
           setSession(login.user);
-        } catch {
-          setLoginOpen(true);
         }
-      } else {
-        const me = await api.get("/api/me");
-        setSession(me.user);
+        await loadDashboard();
+      } catch (error) {
+        api.clearSession();
+        setSession(null);
+        setDashboard(null);
+        setLoginOpen(true);
+        notify(error.message, error.message.includes("not running") ? "error" : "success");
       }
-      await loadDashboard();
     }
     bootstrap();
-  }, [loadDashboard, refreshKey]);
+  }, [loadDashboard, notify, refreshKey]);
 
   useEffect(() => {
     if (!session) return undefined;
@@ -138,12 +144,12 @@ function AppShell() {
     <main className={`app ${theme}`}>
       <Sidebar activeRole={activeRole} setTheme={setTheme} theme={theme} session={session} />
       <section className="shell">
-        <Topbar query={query} setQuery={setQuery} activeRole={activeRole} onLogin={() => setLoginOpen(true)} />
+        <Topbar query={query} setQuery={setQuery} activeRole={activeRole} onLogin={() => setLoginOpen(true)} onLogout={async () => { try { await api.post("/api/auth/logout", {}); } catch {} api.clearSession(); setSession(null); setDashboard(null); setLoginOpen(true); notify("Logged out"); }} />
         <AnimatePresence mode="wait">
           <motion.div key={location.pathname} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<DashboardPage dashboard={dashboard} query={query} onCreate={() => setCreateEventOpen(true)} onShare={() => setShareModal({ albumId: activeEvent?.albums?.[0]?.id })} setLightbox={setLightbox} notify={notify} />} />
+              <Route path="/dashboard" element={<DashboardPage dashboard={dashboard} query={query} onCreate={() => setCreateEventOpen(true)} onEdit={setEditEvent} onRefresh={() => setRefreshKey((key) => key + 1)} onShare={() => setShareModal({ albumId: activeEvent?.albums?.[0]?.id })} setLightbox={setLightbox} notify={notify} />} />
               <Route path="/albums" element={<AlbumsPage setLightbox={setLightbox} notify={notify} onShare={setShareModal} />} />
               <Route path="/uploads" element={<UploadsPage notify={notify} />} />
               <Route path="/ai-search" element={<AiSearchPage setLightbox={setLightbox} notify={notify} />} />
@@ -157,6 +163,7 @@ function AppShell() {
       <NotificationDock notifications={dashboard?.notifications ?? []} notify={notify} />
       <AnimatePresence>{lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} notify={notify} />}</AnimatePresence>
       <AnimatePresence>{createEventOpen && <CreateEventModal onClose={() => setCreateEventOpen(false)} onCreated={() => { setCreateEventOpen(false); setRefreshKey((key) => key + 1); notify("Event and album created"); }} />}</AnimatePresence>
+      <AnimatePresence>{editEvent && <CreateEventModal event={editEvent} onClose={() => setEditEvent(null)} onCreated={() => { setEditEvent(null); setRefreshKey((key) => key + 1); notify("Event updated"); }} />}</AnimatePresence>
       <AnimatePresence>{shareModal && <ShareModal albumId={shareModal.albumId} onClose={() => setShareModal(null)} notify={notify} />}</AnimatePresence>
       <AnimatePresence>{loginOpen && <LoginModal onClose={() => setLoginOpen(false)} onLogin={(user) => { setSession(user); setLoginOpen(false); setRefreshKey((key) => key + 1); notify("Session active"); }} />}</AnimatePresence>
       <AnimatePresence>{toast && <Toast toast={toast} />}</AnimatePresence>
@@ -205,19 +212,20 @@ function Sidebar({ activeRole, theme, setTheme, session }) {
   );
 }
 
-function Topbar({ query, setQuery, activeRole, onLogin }) {
+function Topbar({ query, setQuery, activeRole, onLogin, onLogout }) {
   return (
     <header className="topbar">
       <div className="searchbar"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search events, tags, dates, faces, uploaders..." /></div>
       <div className="topbar-actions">
         <button className="icon-button" type="button" title="Notifications"><Bell size={18} /></button>
         <button className="login-button" type="button" onClick={onLogin}><LogIn size={17} /> {roleLabels[activeRole]}</button>
+        <button className="login-button" type="button" onClick={onLogout}>Logout</button>
       </div>
     </header>
   );
 }
 
-function DashboardPage({ dashboard, query, onCreate, onShare, setLightbox, notify }) {
+function DashboardPage({ dashboard, query, onCreate, onEdit, onRefresh, onShare, setLightbox, notify }) {
   const [sortBy, setSortBy] = useState("date");
   const [category, setCategory] = useState("All");
   const [activeEventId, setActiveEventId] = useState(null);
@@ -231,6 +239,14 @@ function DashboardPage({ dashboard, query, onCreate, onShare, setLightbox, notif
   }, [dashboard, query, category, sortBy]);
   const activeEvent = events.find((event) => event.id === activeEventId) ?? events[0];
   const categories = ["All", ...new Set((dashboard?.events ?? []).map((event) => event.category))];
+
+  async function deleteEvent() {
+    if (!activeEvent) return;
+    await api.delete(`/api/events/${activeEvent.id}`);
+    notify("Event deleted and linked album media moved to trash");
+    setActiveEventId(null);
+    onRefresh();
+  }
 
   if (!dashboard) return <SkeletonPage />;
 
@@ -250,6 +266,7 @@ function DashboardPage({ dashboard, query, onCreate, onShare, setLightbox, notif
           <div className="event-grid">
             {events.map((event) => <EventCard key={event.id} event={event} active={event.id === activeEvent?.id} onClick={() => setActiveEventId(event.id)} />)}
           </div>
+          {activeEvent && <div className="toolbar album-actions"><button onClick={() => onEdit(activeEvent)}><MoreHorizontal size={16} /> Edit event</button><button onClick={deleteEvent}><Trash2 size={16} /> Delete event</button><button onClick={() => setActiveEventId(activeEvent.id)}><Eye size={16} /> View event</button></div>}
           {events.length === 0 && <EmptyState title="No events found" body="Create an event or adjust filters." />}
         </section>
         <AdminPanel activeRole={dashboard.users?.[0]?.role ?? "ADMIN"} users={dashboard.users ?? []} />
@@ -426,7 +443,7 @@ function UploadsPage({ notify }) {
   function addFiles(list) {
     const chosen = Array.from(list);
     setFiles(chosen);
-    setQueue(chosen.map((file) => ({ id: `${file.name}-${file.size}`, name: file.name, status: "Ready", progress: 0 })));
+    setQueue(chosen.map((file) => ({ id: `${file.name}-${file.size}`, name: file.name, type: file.type, preview: URL.createObjectURL(file), status: "Ready", progress: 0 })));
   }
 
   async function startUpload() {
@@ -454,7 +471,7 @@ function UploadsPage({ notify }) {
         <div className="toolbar"><button onClick={() => inputRef.current?.click()}><ImagePlus size={16} /> Choose files</button><button onClick={startUpload}><UploadCloud size={16} /> Start upload</button><button onClick={() => setPaused(!paused)}><RefreshCw size={16} /> {paused ? "Resume" : "Pause"}</button></div>
         <label className="select-wrap"><span>Album</span><select value={albumId} onChange={(event) => setAlbumId(event.target.value)}>{albums.map((album) => <option key={album.id} value={album.id}>{album.title}</option>)}</select><ChevronDown size={14} /></label>
       </div>
-      <div className="upload-queue">{queue.map((row) => <div className="upload-row" key={row.id}><div><strong>{row.name}</strong><span>{paused ? "Paused" : row.status}</span></div><div className="progress"><i style={{ width: `${paused ? Math.min(row.progress, 48) : row.progress}%` }} /></div><small>{paused ? Math.min(row.progress, 48) : row.progress}%</small></div>)}</div>
+      <div className="upload-queue">{queue.map((row) => <div className="upload-row with-preview" key={row.id}>{row.preview && (row.type?.startsWith("video") ? <video src={row.preview} muted playsInline /> : <img src={row.preview} alt="" />)}<div><strong>{row.name}</strong><span>{paused ? "Paused" : row.status}</span></div><div className="progress"><i style={{ width: `${paused ? Math.min(row.progress, 48) : row.progress}%` }} /></div><small>{paused ? Math.min(row.progress, 48) : row.progress}%</small></div>)}</div>
       {queue.length === 0 && <EmptyState title="Queue is empty" body="Drag files into the upload studio to begin." />}
     </section>
   );
@@ -599,19 +616,36 @@ function Lightbox({ item, onClose, notify }) {
   );
 }
 
-function CreateEventModal({ onClose, onCreated }) {
+function CreateEventModal({ event: existingEvent, onClose, onCreated }) {
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", description: "", date: "", category: "Fest", privacy: "PRIVATE", clubName: "Campus Club" });
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({
+    name: existingEvent?.name ?? "",
+    description: existingEvent?.description ?? "",
+    date: existingEvent?.date?.slice(0, 10) ?? "",
+    category: existingEvent?.category ?? "Fest",
+    privacy: existingEvent?.privacy ?? "PRIVATE",
+    clubName: existingEvent?.clubName ?? "Campus Club"
+  });
   const [cover, setCover] = useState(null);
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
+    setError("");
     const data = new FormData();
     Object.entries(form).forEach(([key, value]) => data.append(key, value));
     if (cover) data.append("cover", cover);
-    try { await api.post("/api/events", data); onCreated(); } finally { setSaving(false); }
+    try {
+      if (existingEvent) await api.patch(`/api/events/${existingEvent.id}`, form);
+      else await api.post("/api/events", data);
+      onCreated();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   }
-  return <Modal title="Create event" onClose={onClose}><form className="modal-form" onSubmit={submit}>{["name", "description", "date", "clubName"].map((key) => <label key={key}>{key}<input type={key === "date" ? "date" : "text"} value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} required /></label>)}<label>Category<select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}><option>Fest</option><option>Workshop</option><option>Trip</option><option>Party</option><option>Competition</option></select></label><label>Privacy<select value={form.privacy} onChange={(event) => setForm({ ...form, privacy: event.target.value })}><option value="PUBLIC">Public</option><option value="CLUB_ONLY">Club only</option><option value="PRIVATE">Private</option></select></label><label>Cover image<input type="file" accept="image/*" onChange={(event) => setCover(event.target.files?.[0])} /></label><button className="full-button" disabled={saving}>{saving ? "Saving..." : "Save event"}</button></form></Modal>;
+  return <Modal title={existingEvent ? "Edit event" : "Create event"} onClose={onClose}><form className="modal-form" onSubmit={submit}>{["name", "description", "date", "clubName"].map((key) => <label key={key}>{key}<input type={key === "date" ? "date" : "text"} value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} required /></label>)}<label>Category<select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}><option>Fest</option><option>Workshop</option><option>Trip</option><option>Party</option><option>Competition</option></select></label><label>Privacy<select value={form.privacy} onChange={(event) => setForm({ ...form, privacy: event.target.value })}><option value="PUBLIC">Public</option><option value="CLUB_ONLY">Club only</option><option value="PRIVATE">Private</option></select></label>{!existingEvent && <label>Cover image<input type="file" accept="image/*" onChange={(event) => setCover(event.target.files?.[0])} /></label>}{error && <p className="error-text">{error}</p>}<button className="full-button" disabled={saving}>{saving ? "Saving..." : "Save event"}</button></form></Modal>;
 }
 
 function ShareModal({ albumId, onClose, notify }) {
@@ -644,13 +678,19 @@ function AlbumModal({ album, onClose, onSaved }) {
 }
 
 function LoginModal({ onClose, onLogin }) {
+  const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ email: "admin@momentra.app", password: "momentra123" });
   const [error, setError] = useState("");
   async function submit(event) {
     event.preventDefault();
-    try { const login = await api.post("/api/auth/login", form); api.setSession(login); onLogin(login.user); } catch (err) { setError(err.message); }
+    try {
+      const payload = mode === "signup" ? { ...form, name: form.name || form.email.split("@")[0] } : form;
+      const login = await api.post(mode === "signup" ? "/api/auth/signup" : "/api/auth/login", payload);
+      api.setSession(login);
+      onLogin(login.user);
+    } catch (err) { setError(err.message); }
   }
-  return <Modal title="Login" onClose={onClose}><form className="modal-form" onSubmit={submit}><label>Email<input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label><label>Password<input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>{error && <p className="error-text">{error}</p>}<button className="full-button">Login</button><small>Demo accounts: admin@momentra.app, photo@momentra.app, member@momentra.app, viewer@momentra.app. Password: momentra123.</small></form></Modal>;
+  return <Modal title={mode === "signup" ? "Signup" : "Login"} onClose={onClose}><form className="modal-form" onSubmit={submit}>{mode === "signup" && <label>Name<input value={form.name ?? ""} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>}<label>Email<input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label><label>Password<input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>{error && <p className="error-text">{error}</p>}<button className="full-button">{mode === "signup" ? "Create account" : "Login"}</button><button type="button" className="button-like" onClick={() => setMode(mode === "signup" ? "login" : "signup")}>{mode === "signup" ? "Use existing account" : "Create new account"}</button><small>Demo accounts: admin@momentra.app, photo@momentra.app, member@momentra.app, viewer@momentra.app. Password: momentra123.</small></form></Modal>;
 }
 
 function Modal({ title, children, onClose }) {

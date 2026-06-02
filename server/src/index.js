@@ -15,6 +15,9 @@ import { z } from "zod";
 import { canAccessAlbum, requireAuth, requireRole, signAccess, signRefresh, verifyToken } from "./auth.js";
 import { emit, attachRealtime } from "./realtime.js";
 import { enrichMedia, eventStats, id, now, publicUser, readDb, roleRank, transact } from "./db.js";
+import { faceEmbedding, semanticScore, similarity, tagImage } from "./services/aiService.js";
+import { analyzeImage, applyWatermark, createDerivatives } from "./services/imageService.js";
+import { getObjectBuffer, putObject, signedReadUrl, signedWriteUrl, storageMode } from "./services/storageService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.resolve(__dirname, "../uploads");
@@ -35,10 +38,7 @@ const corsOptions = {
 await attachRealtime(server, [/^http:\/\/(localhost|127\.0\.0\.1):\d+$/, webOrigin]);
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: uploadDir,
-    filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replaceAll(" ", "-")}`)
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 }
 });
 
@@ -83,7 +83,7 @@ function computeAnalytics(db) {
   const complete = activeMedia.filter((item) => item.processing.status === "COMPLETE").length;
   return [
     { label: "Media assets", value: activeMedia.length, delta: "+ live DB count" },
-    { label: "CDN delivered", value: `${(storageMb / 1024).toFixed(2)}TB`, delta: "local adapter ready" },
+    { label: "CDN delivered", value: `${(storageMb / 1024).toFixed(2)}TB`, delta: `${storageMode()} storage` },
     { label: "Active members", value: db.users.filter((user) => !user.banned).length, delta: "RBAC users" },
     { label: "AI matches", value: activeMedia.reduce((sum, item) => sum + item.faces.length, 0), delta: "faces indexed" },
     { label: "Downloads", value: db.activity.filter((item) => item.type === "DOWNLOAD").length, delta: "watermarked by role" },
@@ -116,7 +116,15 @@ app.post("/api/auth/signup", asyncRoute(async (req, res) => {
     db.users.push(user);
     return user;
   });
-  res.status(201).json({ user: publicUser(result), token: signAccess(result), refreshToken: signRefresh(result) });
+  const token = signAccess(result);
+  res.status(201).json({ user: publicUser(result), token, accessToken: token, refreshToken: signRefresh(result) });
+}));
+
+app.post("/api/auth/logout", requireAuth, asyncRoute(async (req, res) => {
+  await transact(async (db) => {
+    db.sessions = db.sessions.filter((session) => session.userId !== req.auth.sub);
+  });
+  res.json({ ok: true });
 }));
 
 app.post("/api/auth/login", asyncRoute(async (req, res) => {
@@ -126,7 +134,8 @@ app.post("/api/auth/login", asyncRoute(async (req, res) => {
   if (!user || user.banned || !(await bcrypt.compare(body.password, user.passwordHash))) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
-  res.json({ user: publicUser(user), token: signAccess(user), refreshToken: signRefresh(user) });
+  const token = signAccess(user);
+  res.json({ user: publicUser(user), token, accessToken: token, refreshToken: signRefresh(user) });
 }));
 
 app.post("/api/auth/refresh", asyncRoute(async (req, res) => {
@@ -135,7 +144,8 @@ app.post("/api/auth/refresh", asyncRoute(async (req, res) => {
   const db = await readDb();
   const user = db.users.find((item) => item.id === payload.sub && !item.banned);
   if (!user) return res.status(401).json({ error: "Invalid refresh token" });
-  res.json({ token: signAccess(user), user: publicUser(user) });
+  const token = signAccess(user);
+  res.json({ token, accessToken: token, user: publicUser(user), refreshToken: body.refreshToken });
 }));
 
 app.post("/api/auth/password-reset", asyncRoute(async (req, res) => {
@@ -148,6 +158,13 @@ app.post("/api/auth/password-reset", asyncRoute(async (req, res) => {
 }));
 
 app.get("/api/me", requireAuth, asyncRoute(async (req, res) => {
+  const db = await readDb();
+  const user = userFromDb(db, req);
+  if (!user) return res.status(401).json({ error: "User not found" });
+  res.json({ user: publicUser(user), permissions: roleRank[user.role] });
+}));
+
+app.get("/api/auth/me", requireAuth, asyncRoute(async (req, res) => {
   const db = await readDb();
   const user = userFromDb(db, req);
   if (!user) return res.status(401).json({ error: "User not found" });
@@ -192,11 +209,16 @@ app.post("/api/events", requireAuth, requireRole("ADMIN"), upload.single("cover"
     privacy: z.enum(["PUBLIC", "PRIVATE", "CLUB_ONLY"]),
     clubName: z.string().min(2).default("Campus Club")
   }).parse(req.body);
+  let coverUrl = "https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&w=1600&q=80";
+  if (req.file) {
+    const key = `covers/${Date.now()}-${req.file.originalname.replaceAll(" ", "-")}`;
+    coverUrl = (await putObject({ buffer: req.file.buffer, key, contentType: req.file.mimetype, localRoot: uploadDir })).url;
+  }
   const result = await transact(async (db) => {
     const event = {
       id: id("evt"),
       ...body,
-      coverUrl: req.file ? `/uploads/${req.file.filename}` : "https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&w=1600&q=80",
+      coverUrl,
       createdById: req.auth.sub,
       createdAt: now(),
       updatedAt: now()
@@ -221,11 +243,41 @@ app.post("/api/events", requireAuth, requireRole("ADMIN"), upload.single("cover"
   res.status(201).json(result);
 }));
 
+app.delete("/api/events/:id", requireAuth, requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  await transact(async (db) => {
+    const index = db.events.findIndex((event) => event.id === req.params.id);
+    if (index === -1) throw Object.assign(new Error("Event not found"), { status: 404 });
+    db.events.splice(index, 1);
+    const albumIds = db.albums.filter((album) => album.eventId === req.params.id).map((album) => album.id);
+    db.albums = db.albums.filter((album) => album.eventId !== req.params.id);
+    db.media.forEach((item) => {
+      if (albumIds.includes(item.albumId)) item.deletedAt = now();
+    });
+    db.activity.unshift({ id: id("act"), type: "EVENT_DELETED", userId: req.auth.sub, entityId: req.params.id, createdAt: now() });
+  });
+  emit("event:deleted", { id: req.params.id });
+  res.status(204).end();
+}));
+
 app.patch("/api/events/:id", requireAuth, requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  const body = z.object({
+    name: z.string().min(2).optional(),
+    description: z.string().min(5).optional(),
+    date: z.string().min(4).optional(),
+    category: z.string().min(2).optional(),
+    privacy: z.enum(["PUBLIC", "PRIVATE", "CLUB_ONLY"]).optional(),
+    clubName: z.string().min(2).optional()
+  }).parse(req.body);
   const result = await transact(async (db) => {
     const event = db.events.find((item) => item.id === req.params.id);
     if (!event) throw Object.assign(new Error("Event not found"), { status: 404 });
-    Object.assign(event, req.body, { updatedAt: now() });
+    Object.assign(event, body, { updatedAt: now() });
+    db.albums.filter((album) => album.eventId === event.id).forEach((album) => {
+      if (body.name) album.title = `${body.name} Album`;
+      if (body.description) album.description = body.description;
+      if (body.privacy) album.visibility = body.privacy;
+      album.updatedAt = now();
+    });
     return serializeEvent(db, event);
   });
   emit("event:updated", result);
@@ -306,50 +358,76 @@ app.get("/api/media", requireAuth, asyncRoute(async (req, res) => {
 
 app.post("/api/uploads", requireAuth, requireRole("PHOTOGRAPHER"), upload.array("files", 30), asyncRoute(async (req, res) => {
   const body = z.object({ albumId: z.string() }).parse(req.body);
+  if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
   const created = await transact(async (db) => {
     const album = db.albums.find((item) => item.id === body.albumId);
     if (!album) throw Object.assign(new Error("Album not found"), { status: 404 });
     const event = db.events.find((item) => item.id === album.eventId);
-    return req.files.map((file, index) => {
-      const baseTags = ["upload", event.category.toLowerCase(), index % 2 ? "people" : "stage"];
+    return Promise.all(req.files.map(async (file) => {
+      const originalKey = `albums/${album.id}/originals/${Date.now()}-${file.originalname.replaceAll(" ", "-")}`;
+      const optimizedKey = `albums/${album.id}/optimized/${Date.now()}-${file.originalname.replace(/\.[^/.]+$/, "")}.jpg`;
+      const thumbnailKey = `albums/${album.id}/thumbnails/${Date.now()}-${file.originalname.replace(/\.[^/.]+$/, "")}.jpg`;
+      const isImage = file.mimetype.startsWith("image/");
+      let imageMetadata = {};
+      let ai = { tags: ["upload", event.category.toLowerCase()], caption: `Uploaded media for ${event.name}`, moderationStatus: "PENDING", embedding: null };
+      let optimizedResult;
+      let thumbnailResult;
+
+      const originalResult = await putObject({ buffer: file.buffer, key: originalKey, contentType: file.mimetype, localRoot: uploadDir });
+      if (isImage) {
+        const analysis = await analyzeImage(file.buffer);
+        imageMetadata = analysis.metadata;
+        const derivatives = await createDerivatives(file.buffer);
+        optimizedResult = await putObject({ buffer: derivatives.optimized, key: optimizedKey, contentType: "image/jpeg", localRoot: uploadDir });
+        thumbnailResult = await putObject({ buffer: derivatives.thumbnail, key: thumbnailKey, contentType: "image/jpeg", localRoot: uploadDir });
+        ai = await tagImage({ fileName: file.originalname, event, metadata: { ...analysis.metadata, buffer: file.buffer }, stats: analysis.stats });
+      }
       const item = {
         id: id("med"),
         eventId: album.eventId,
         albumId: album.id,
         uploaderId: req.auth.sub,
         type: file.mimetype.startsWith("video") ? "VIDEO" : "PHOTO",
-        url: `/uploads/${file.filename}`,
-        thumbnailUrl: `/uploads/${file.filename}`,
+        url: optimizedResult?.url ?? originalResult.url,
+        originalUrl: originalResult.url,
+        thumbnailUrl: thumbnailResult?.url ?? originalResult.url,
+        storageMode: originalResult.mode,
+        originalKey,
+        optimizedKey: optimizedResult?.key ?? originalKey,
+        thumbnailKey: thumbnailResult?.key ?? originalKey,
         fileName: file.originalname,
         caption: file.originalname.replace(/\.[^/.]+$/, "").replaceAll("-", " "),
-        aiCaption: `AI caption generated for ${event.name}`,
-        tags: baseTags,
-        faces: ["usr_member"],
-        duplicateScore: Math.random() * 0.2,
-        moderationStatus: "APPROVED",
-        metadata: { sizeMb: Number((file.size / 1024 / 1024).toFixed(2)), mimeType: file.mimetype, storageKey: file.filename },
-        processing: { status: "PROCESSING", progress: 12, stage: "Queued" },
+        aiCaption: ai.caption,
+        tags: ai.tags,
+        faces: [],
+        faceEmbedding: isImage ? await faceEmbedding(file.buffer) : null,
+        duplicateScore: 0,
+        moderationStatus: ai.moderationStatus,
+        metadata: { sizeMb: Number((file.size / 1024 / 1024).toFixed(2)), mimeType: file.mimetype, width: imageMetadata.width, height: imageMetadata.height, storageKey: originalKey, optimizedKey, thumbnailKey },
+        processing: { status: "COMPLETE", progress: 100, stage: "AI indexed" },
+        embedding: ai.embedding,
         createdAt: now(),
         updatedAt: now(),
         deletedAt: null
       };
+      const duplicate = db.media.find((existing) => existing.embedding && existing.embedding === item.embedding);
+      if (duplicate) item.duplicateScore = 1;
       db.media.unshift(item);
       addNotification(db, { userId: event.createdById, type: "UPLOAD", text: `${file.originalname} uploaded to ${album.title}`, entityType: "media", entityId: item.id });
       return enrichMedia(db, item, req.auth.sub);
-    });
+    }));
   });
   emit("upload:created", created);
-  setTimeout(async () => {
-    const processed = await transact(async (db) => {
-      return created.map((item) => {
-        const media = db.media.find((entry) => entry.id === item.id);
-        if (media) media.processing = { status: "COMPLETE", progress: 100, stage: "AI indexed" };
-        return media;
-      }).filter(Boolean);
-    });
-    emit("upload:processed", processed);
-  }, 1200);
+  emit("upload:processed", created);
   res.status(201).json({ data: created });
+}));
+
+app.post("/api/uploads/signed-url", requireAuth, requireRole("PHOTOGRAPHER"), asyncRoute(async (req, res) => {
+  const body = z.object({ albumId: z.string(), fileName: z.string(), contentType: z.string() }).parse(req.body);
+  const key = `albums/${body.albumId}/originals/${Date.now()}-${body.fileName.replaceAll(" ", "-")}`;
+  const uploadUrl = await signedWriteUrl({ key, contentType: body.contentType });
+  if (!uploadUrl) return res.status(501).json({ error: "S3 credentials are not configured; signed upload URLs require AWS_REGION and S3_BUCKET_ORIGINALS." });
+  res.json({ key, uploadUrl });
 }));
 
 app.patch("/api/media/:id/trash", requireAuth, requireRole("PHOTOGRAPHER"), asyncRoute(async (req, res) => {
@@ -431,15 +509,27 @@ app.post("/api/media/:id/tag", requireAuth, requireRole("CLUB_MEMBER"), asyncRou
 app.post("/api/media/:id/download", requireAuth, asyncRoute(async (req, res) => {
   const db = await readDb();
   const media = db.media.find((item) => item.id === req.params.id);
+  if (!media) return res.status(404).json({ error: "Media not found" });
   const event = db.events.find((item) => item.id === media?.eventId);
   const user = userFromDb(db, req);
+  const album = db.albums.find((item) => item.id === media.albumId);
+  if (!canAccessAlbum(user.role, album.visibility)) return res.status(403).json({ error: "Album access denied" });
+  const sourceKey = media.optimizedKey ?? media.originalKey ?? media.metadata?.storageKey;
+  let source;
+  if (sourceKey) source = await getObjectBuffer({ key: sourceKey, localRoot: uploadDir });
+  else if (media.url?.startsWith("http")) source = Buffer.from(await (await fetch(media.url)).arrayBuffer());
+  else return res.status(422).json({ error: "Media source is unavailable for watermarking" });
+  const watermarked = await applyWatermark(source, { clubName: event.clubName, eventName: event.name, role: user.role });
+  const downloadKey = `downloads/${media.id}-${user.role}.jpg`;
+  const stored = await putObject({ buffer: watermarked, key: downloadKey, contentType: "image/jpeg", localRoot: uploadDir });
   await transact(async (next) => {
     next.activity.unshift({ id: id("act"), type: "DOWNLOAD", userId: user.id, entityId: req.params.id, createdAt: now() });
   });
+  const signedUrl = await signedReadUrl(downloadKey);
   res.json({
-    url: media.url,
+    url: signedUrl ?? stored.url,
     watermark: {
-      text: roleRank[user.role] >= roleRank.PHOTOGRAPHER ? `${event.clubName} • ${event.name}` : `${event.clubName} • Momentra`,
+      text: `${event.clubName} • ${event.name} • ${user.role}`,
       opacity: user.role === "VIEWER" ? 0.42 : 0.24,
       position: "bottom-right"
     }
@@ -466,6 +556,28 @@ app.post("/api/share", requireAuth, asyncRoute(async (req, res) => {
   res.status(201).json({ ...share, url: `${webOrigin}/share/${share.token}` });
 }));
 
+app.get("/api/public/share/:token", asyncRoute(async (req, res) => {
+  const db = await readDb();
+  const share = db.shares.find((item) => item.token === req.params.token && new Date(item.expiresAt) > new Date());
+  if (!share) return res.status(404).json({ error: "Share link not found or expired" });
+  const album = db.albums.find((item) => item.id === share.albumId);
+  if (!album || (share.privacy !== "PUBLIC" && album.visibility !== "PUBLIC")) return res.status(403).json({ error: "Private share requires authentication" });
+  const event = db.events.find((item) => item.id === album.eventId);
+  const media = db.media.filter((item) => item.albumId === album.id && !item.deletedAt).map((item) => enrichMedia(db, item, null));
+  res.json({ share, album, event, media });
+}));
+
+app.get("/api/public/media", asyncRoute(async (req, res) => {
+  const db = await readDb();
+  const albumId = req.query.albumId ? String(req.query.albumId) : null;
+  const publicAlbumIds = new Set(db.albums.filter((album) => album.visibility === "PUBLIC").map((album) => album.id));
+  const data = db.media
+    .filter((item) => !item.deletedAt && publicAlbumIds.has(item.albumId))
+    .filter((item) => !albumId || item.albumId === albumId)
+    .map((item) => enrichMedia(db, item, null));
+  res.json({ data });
+}));
+
 app.get("/api/notifications", requireAuth, asyncRoute(async (req, res) => {
   const db = await readDb();
   res.json({ data: db.notifications.filter((item) => item.userId === req.auth.sub).slice(0, 50) });
@@ -489,13 +601,16 @@ app.get("/api/ai/search", requireAuth, asyncRoute(async (req, res) => {
   const eventId = req.query.eventId ? String(req.query.eventId) : null;
   const uploaderId = req.query.uploaderId ? String(req.query.uploaderId) : null;
   const allowedAlbums = new Set(db.albums.filter((album) => canAccessAlbum(user.role, album.visibility)).map((album) => album.id));
+  const uploadDate = req.query.uploadDate ? String(req.query.uploadDate) : null;
   const data = db.media
     .filter((item) => !item.deletedAt && allowedAlbums.has(item.albumId))
     .filter((item) => !eventId || item.eventId === eventId)
     .filter((item) => !uploaderId || item.uploaderId === uploaderId)
+    .filter((item) => !uploadDate || item.createdAt.startsWith(uploadDate))
     .map((item) => {
-      const semanticText = `${item.caption} ${item.aiCaption} ${item.tags.join(" ")} ${db.events.find((event) => event.id === item.eventId)?.name ?? ""}`.toLowerCase();
-      const score = q ? q.split(/\s+/).reduce((sum, token) => sum + (semanticText.includes(token) ? 28 : 0), 42 + item.tags.length * 4) : 74;
+      const event = db.events.find((entry) => entry.id === item.eventId);
+      const uploader = db.users.find((entry) => entry.id === item.uploaderId);
+      const score = semanticScore(q, item, event, uploader);
       return { ...enrichMedia(db, item, user.id), matchScore: Math.min(99, score) };
     })
     .filter((item) => !q || item.matchScore > 42)
@@ -504,12 +619,16 @@ app.get("/api/ai/search", requireAuth, asyncRoute(async (req, res) => {
 }));
 
 app.post("/api/ai/find-my-photos", requireAuth, upload.single("selfie"), asyncRoute(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Selfie upload is required" });
   const db = await readDb();
   const user = userFromDb(db, req);
+  const reference = await faceEmbedding(req.file.buffer);
   const data = db.media
-    .filter((item) => !item.deletedAt && (item.faces.includes(user.id) || item.faces.includes("usr_member")))
-    .map((item, index) => ({ ...enrichMedia(db, item, user.id), matchScore: Math.max(76, 96 - index * 5), referenceSelfie: req.file ? `/uploads/${req.file.filename}` : null }));
-  res.json({ referenceFaceId: id("face"), data });
+    .filter((item) => !item.deletedAt && item.faceEmbedding)
+    .map((item) => ({ ...enrichMedia(db, item, user.id), matchScore: similarity(reference, item.faceEmbedding), referenceFaceId: reference.slice(0, 16) }))
+    .filter((item) => item.matchScore >= 45)
+    .sort((a, b) => b.matchScore - a.matchScore);
+  res.json({ referenceFaceId: reference.slice(0, 16), data });
 }));
 
 app.get("/api/users", requireAuth, requireRole("ADMIN"), asyncRoute(async (_req, res) => {

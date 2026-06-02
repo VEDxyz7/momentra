@@ -570,6 +570,19 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.upload-row.with-preview {
+  grid-template-columns: 62px minmax(120px, 1fr) minmax(120px, 220px) 44px;
+}
+
+.upload-row.with-preview img,
+.upload-row.with-preview video {
+  width: 62px;
+  height: 62px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+
 .gallery-panel {
   margin-top: 18px;
 }

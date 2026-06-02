@@ -39,11 +39,16 @@ export function now() {
 
 async function seedData() {
   const passwordHash = await bcrypt.hash("momentra123", 12);
+  const devPasswordHash = await bcrypt.hash("password123", 12);
   const users = [
     { id: "usr_admin", name: "Aarav Admin", email: "admin@momentra.app", role: "ADMIN", passwordHash, avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80", verified: true, banned: false, createdAt: now() },
     { id: "usr_photo", name: "Mira Photographer", email: "photo@momentra.app", role: "PHOTOGRAPHER", passwordHash, avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80", verified: true, banned: false, createdAt: now() },
     { id: "usr_member", name: "Kabir Member", email: "member@momentra.app", role: "CLUB_MEMBER", passwordHash, avatarUrl: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&q=80", verified: true, banned: false, createdAt: now() },
-    { id: "usr_viewer", name: "Ira Viewer", email: "viewer@momentra.app", role: "VIEWER", passwordHash, avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80", verified: true, banned: false, createdAt: now() }
+    { id: "usr_viewer", name: "Ira Viewer", email: "viewer@momentra.app", role: "VIEWER", passwordHash, avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80", verified: true, banned: false, createdAt: now() },
+    { id: "usr_dev_admin", name: "Local Admin", email: "admin@example.com", role: "ADMIN", passwordHash: devPasswordHash, avatarUrl: "https://api.dicebear.com/9.x/initials/svg?seed=Admin", verified: true, banned: false, createdAt: now() },
+    { id: "usr_dev_photo", name: "Local Photographer", email: "photographer@example.com", role: "PHOTOGRAPHER", passwordHash: devPasswordHash, avatarUrl: "https://api.dicebear.com/9.x/initials/svg?seed=Photographer", verified: true, banned: false, createdAt: now() },
+    { id: "usr_dev_member", name: "Local Member", email: "member@example.com", role: "CLUB_MEMBER", passwordHash: devPasswordHash, avatarUrl: "https://api.dicebear.com/9.x/initials/svg?seed=Member", verified: true, banned: false, createdAt: now() },
+    { id: "usr_dev_viewer", name: "Local Viewer", email: "viewer@example.com", role: "VIEWER", passwordHash: devPasswordHash, avatarUrl: "https://api.dicebear.com/9.x/initials/svg?seed=Viewer", verified: true, banned: false, createdAt: now() }
   ];
 
   const events = [
@@ -125,7 +130,36 @@ export async function readDb() {
     const seeded = await seedData();
     await writeFile(dbPath, JSON.stringify(seeded, null, 2));
   }
-  return JSON.parse(await readFile(dbPath, "utf-8"));
+  const db = JSON.parse(await readFile(dbPath, "utf-8"));
+  if (await ensureDevUsers(db)) await writeDb(db);
+  return db;
+}
+
+async function ensureDevUsers(db) {
+  const devUsers = [
+    ["usr_dev_admin", "Local Admin", "admin@example.com", "ADMIN"],
+    ["usr_dev_photo", "Local Photographer", "photographer@example.com", "PHOTOGRAPHER"],
+    ["usr_dev_member", "Local Member", "member@example.com", "CLUB_MEMBER"],
+    ["usr_dev_viewer", "Local Viewer", "viewer@example.com", "VIEWER"]
+  ];
+  let changed = false;
+  for (const [idValue, name, email, role] of devUsers) {
+    if (!db.users.some((user) => user.email === email)) {
+      db.users.push({
+        id: idValue,
+        name,
+        email,
+        role,
+        passwordHash: await bcrypt.hash("password123", 12),
+        avatarUrl: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(name)}`,
+        verified: true,
+        banned: false,
+        createdAt: now()
+      });
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 export async function writeDb(next) {
