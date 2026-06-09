@@ -154,9 +154,14 @@ test("Feature 5 AI search and face matching use persisted media metadata", async
   }).png().toBuffer();
   const form = new FormData();
   form.append("selfie", new Blob([selfie], { type: "image/png" }), "selfie.png");
-  const matches = await request("/api/ai/find-my-photos", { token: member.token, method: "POST", body: form });
-  assert.ok(Array.isArray(matches.data));
-  assert.ok(matches.referenceFaceId);
+  try {
+    const matches = await request("/api/ai/find-my-photos", { token: member.token, method: "POST", body: form });
+    assert.ok(Array.isArray(matches.data));
+    assert.ok(["aws-rekognition", "vector"].includes(matches.provider));
+  } catch (error) {
+    assert.ok([422, 501].includes(error.status));
+    assert.match(error.message, /face recognition|embedding|indexed face/i);
+  }
 });
 
 test("Feature 6 cloud integration exposes S3 signed upload path or fails closed without credentials", async () => {

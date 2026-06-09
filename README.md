@@ -1,281 +1,331 @@
 # Momentra
 
-Momentra is an AI-powered Event & Media Management Platform designed for clubs, societies, student organizations, photographers, and event teams. It provides a centralized system for managing events, organizing media, enabling social interactions, and discovering content through AI-powered search and facial recognition.
+Momentra is a modern Event & Media Management Platform for clubs, societies, college communities, photographers, and student organizers. It works like a focused blend of Google Photos, Instagram, and Drive: events become structured albums, media can be uploaded and discovered quickly, access is role-based, and AI features help users find the photos that matter to them.
 
-## Overview
+The platform is designed for real campus/event workflows such as photoshoots, workshops, fests, trips, competitions, hackathons, conferences, parties, and club activities.
 
-Organizations frequently generate large volumes of photos and videos during events such as workshops, hackathons, cultural festivals, conferences, competitions, and trips. Media often becomes fragmented across multiple storage systems, making organization and retrieval difficult.
+## What Momentra Solves
 
-Momentra addresses this problem through:
+College clubs and societies usually collect event photos across WhatsApp groups, Google Drive folders, individual phones, camera SD cards, and scattered social posts. Momentra centralizes that workflow into one product:
 
-- Event-based media organization
-- Secure access control
-- Social engagement features
-- AI-powered discovery
-- Cloud-based storage architecture
-- Personalized photo retrieval
+- Organizers create events and albums.
+- Photographers upload photos and videos in bulk.
+- Members browse, like, comment, save, share, and download media.
+- Viewers can access public albums safely.
+- AI tagging and face search help users discover relevant photos.
+- Watermarked downloads preserve event and club branding.
 
----
+## Core Features
 
-## Features
+### 1. Event Management
 
-### Event Management
+Participants can create, manage, and organize events with structured metadata.
 
-- Create, edit, and delete events
-- Event metadata management
-- Event categorization
-- Event-wise album generation
-- Sorting and filtering
+- Create and manage events
+- Event-wise albums generated automatically
+- Event descriptions and metadata
+- Event cover/banner support
+- Sorting by:
+  - Event name
+  - Date
+  - Category
 
-### Media Management
+Stored event metadata includes:
 
-- Image and video uploads
+- Event name
+- Description
+- Date
+- Category
+- Club name
+- Privacy setting
+- Cover image
+
+### 2. Media Upload System
+
+Momentra supports a complete media upload workflow for photos and videos.
+
+- Upload photos and videos
 - Bulk uploads
-- Drag-and-drop support
-- Media previews
-- Upload progress tracking
-- Optimized media storage
+- Drag-and-drop upload support
+- Media preview before upload
+- Upload queue with progress states
+- Optimized image derivatives
+- Thumbnail generation
+- Compression and faster gallery loading
+- Metadata storage for uploaded assets
 
-### Authentication and Access Control
+Uploaded media is organized under event albums and becomes available in the gallery after processing.
 
-Role-based access control for:
+### 3. Access Control & Authentication
+
+The system supports secure role-based access.
+
+Roles:
 
 - Admin
 - Photographer
 - Club Member
 - Viewer
 
-Features include:
+Access behavior:
 
-- Authentication
-- Session management
-- Protected routes
-- Public and private media access
+- Public media is accessible to everyone.
+- Private media is accessible only to authorized users.
+- Club-only albums are limited to club members and higher roles.
+- Protected routes and backend middleware enforce permissions.
+- JWT authentication is used for login/session handling.
 
-### Social Features
+### 4. Social Features
 
-- Likes
-- Comments
-- Favorites
-- Sharing
-- User tagging
-- Download functionality
+Momentra includes social interaction features inspired by Instagram and Discord-style event communities.
+
+- Like media
+- Comment on media
+- Share albums/media
+- Download media
+- Add to favourites
+- Tag users/friends
 - Real-time notifications
 
-### AI Features
+Example notifications:
 
-#### Smart Image Tagging
+- Someone liked your photo
+- Someone tagged you
+- Someone commented on your upload
+- New media was uploaded to an album
 
-Automatic tag generation for uploaded media.
+### 5. AI/ML Features
 
-#### Advanced Search
+Momentra includes AI-powered discovery features for event media.
 
-Search by:
+Smart Image Tagging:
 
-- Event Name
-- Tags
-- Upload Date
-- User Name
+- Automatically generates tags such as:
+  - mountains
+  - beach
+  - sports
+  - crowd
+  - stage
+  - workshop
+  - concert
 
-#### Facial Recognition
+Advanced Search:
 
-Users can:
+- Search by event name
+- Search by tags
+- Search by upload date
+- Search by user/uploader name
 
-1. Upload a reference selfie
-2. Detect matching photos
-3. View personalized galleries
+Facial Recognition:
 
-### Cloud Storage
+- User uploads a reference selfie
+- System detects faces in the reference image
+- Stored face embeddings are compared against album media
+- Matching photos are displayed in a personalized results section
 
-- AWS S3 integration
-- CloudFront CDN delivery
-- Secure file access
-- Scalable media storage
+The local implementation uses `face-api.js` with TensorFlow.js descriptors, with optional AWS Rekognition support for cloud-backed face collections.
 
-### Watermarking
+### 6. Cloud Integration
 
-Dynamic watermark generation during downloads using:
+Momentra is structured for scalable cloud media delivery.
 
-- Club Name
-- Event Name
-- User Role
+- AWS S3 support for object storage
+- Signed upload/read URL support
+- CloudFront/CDN-ready media URLs
+- Local storage fallback for development
+- Optimized originals, thumbnails, and derivatives
 
-### Analytics
+Suggested cloud service:
 
-- Event statistics
-- Upload metrics
-- Storage utilization
-- User engagement insights
+- AWS S3
 
----
+### 7. Watermarking System
 
-## Technology Stack
+Momentra supports dynamic watermarking during downloads.
 
-### Frontend
+Watermark content can include:
+
+- Club name
+- Event name
+- User role
+
+This ensures exported media carries proper branding and usage context.
+
+## Tech Stack
+
+Frontend:
 
 - React
 - Vite
 - React Router
+- Framer Motion
+- Zustand-style state patterns
+- CSS glassmorphism dashboard styling
 
-### Backend
+Backend:
 
 - Node.js
 - Express.js
+- Multer uploads
+- Socket.IO realtime events
+- JWT authentication
+- Zod validation
+- Helmet, CORS, compression, rate limiting
 
-### Database
+Database and ORM:
 
-- PostgreSQL
-- Prisma ORM
+- PostgreSQL schema via Prisma
+- Local JSON persistence for development/demo mode
 
-### Authentication
+Storage:
 
-- JWT
-- Refresh Tokens
+- AWS S3 optional production adapter
+- CloudFront-ready URLs
+- Local file storage fallback under `server/uploads`
 
-### Cloud Services
+AI/ML:
 
-- AWS S3
-- CloudFront
+- `face-api.js`
+- TensorFlow.js
+- AWS Rekognition optional provider
+- Sharp image processing
 
-### Real-Time Communication
+Testing and DevOps:
 
-- Socket.IO
+- Node test runner
+- Dockerfile
+- Docker Compose
+- Vite production build
 
-### AI and Machine Learning
+## Database Schema
 
-- AWS Rekognition
-- OpenCV
-- TensorFlow
-- Face API
-
----
-
-## System Architecture
+The Prisma schema is located at:
 
 ```text
-Frontend (React/Vite)
-        |
-        v
-Express API Server
-        |
-  +-----+-----+
-  |     |     |
-  v     v     v
-PostgreSQL  S3  Redis
-        |
-        v
-AI Processing Services
+prisma/schema.prisma
 ```
 
----
+Core models:
+
+- `User`: platform users with role-based access.
+- `Event`: event metadata such as name, date, category, cover image, and club name.
+- `Album`: event-wise media collections with public/private/club-only visibility.
+- `MediaAsset`: uploaded photo/video records with storage keys, thumbnails, metadata, and AI fields.
+- `MediaTag`: generated tags for search and filtering.
+- `FaceEmbedding`: detected face descriptors/provider face IDs linked to media.
+- `FaceTag`: user/person tags on media faces.
+- `AIEmbedding`: semantic/AI vector metadata.
+- `Comment`: media comments.
+- `Like`: media likes.
+- `Favourite`: saved media.
+- `Notification`: realtime user notifications.
+- `ShareLink`: album sharing tokens and expiry metadata.
+- `EventMember`: event membership and role mapping.
+
+Main relationships:
+
+```text
+User 1---N MediaAsset
+User 1---N Comment
+User 1---N Notification
+
+Event 1---N Album
+Event N---N User through EventMember
+
+Album 1---N MediaAsset
+Album 1---N ShareLink
+
+MediaAsset 1---N MediaTag
+MediaAsset 1---N FaceEmbedding
+MediaAsset 1---N Comment
+MediaAsset 1---N Like
+MediaAsset 1---N Favourite
+```
+
+## Architecture
+
+```mermaid
+flowchart TD
+  A["React + Vite Client"] --> B["Express API Server"]
+  B --> C["Auth + RBAC Middleware"]
+  B --> D["Event, Album, Media APIs"]
+  B --> E["Upload Pipeline"]
+  B --> F["Social APIs"]
+  B --> G["AI Search + Face Search"]
+  B --> H["Socket.IO Realtime"]
+
+  E --> I["Sharp Optimization"]
+  E --> J["S3 or Local Storage"]
+  E --> K["Thumbnail + Metadata"]
+  E --> L["AI Tagging + Face Embeddings"]
+
+  D --> M["PostgreSQL via Prisma Schema"]
+  F --> M
+  G --> M
+  C --> M
+
+  J --> N["CloudFront/CDN Ready Delivery"]
+  H --> A
+```
+
+System flow:
+
+1. User logs in through the React app.
+2. JWT-protected API routes validate identity and role.
+3. Admins create events, which automatically create albums.
+4. Photographers upload media to albums.
+5. Upload pipeline optimizes images, stores files, creates thumbnails, extracts metadata, generates tags, and indexes faces.
+6. Members interact with media through likes, comments, favourites, tags, shares, and downloads.
+7. Notifications are emitted through Socket.IO.
+8. AI search and face search read persisted metadata and embeddings.
 
 ## Project Structure
 
 ```text
-Momentra/
-│
+momentra/
 ├── docs/
 │   ├── API.md
 │   ├── ARCHITECTURE.md
+│   ├── ARCHITECTURE_DIAGRAM.md
+│   ├── DATABASE_SCHEMA.md
 │   └── PITCH_DECK.md
-│
 ├── prisma/
 │   └── schema.prisma
-│
+├── scripts/
+│   ├── dev.mjs
+│   └── prove-face-recognition.mjs
 ├── server/
-│   └── src/
-│       ├── middleware/
-│       ├── services/
-│       ├── routes/
-│       ├── controllers/
-│       └── index.js
-│
+│   ├── data/
+│   ├── src/
+│   │   ├── auth.js
+│   │   ├── db.js
+│   │   ├── index.js
+│   │   ├── realtime.js
+│   │   └── services/
+│   └── uploads/
 ├── src/
-│   ├── components/
-│   ├── pages/
-│   ├── hooks/
-│   ├── contexts/
-│   ├── services/
+│   ├── lib/
 │   ├── styles/
 │   └── main.jsx
-│
 ├── tests/
-│
+├── Dockerfile
+├── docker-compose.yml
 ├── package.json
 └── README.md
 ```
 
----
+## Local Setup
 
-## Environment Variables
-
-Create a `.env` file:
-
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/momentra
-
-JWT_SECRET=your_jwt_secret
-
-PORT=5000
-
-AWS_REGION=ap-south-1
-
-AWS_ACCESS_KEY_ID=your_access_key
-
-AWS_SECRET_ACCESS_KEY=your_secret_key
-
-S3_BUCKET_ORIGINALS=momentra-originals
-
-S3_BUCKET_DERIVATIVES=momentra-derivatives
-
-CLOUDFRONT_URL=https://your-cloudfront-url
-
-CLIENT_URL=http://localhost:5173
-```
-
----
-
-## Installation
-
-### Clone Repository
-
-```bash
-git clone https://github.com/VEDxyz7/momentra.git
-cd momentra
-```
-
-### Install Dependencies
-
-Frontend:
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-Backend:
-
-```bash
-cd server
-npm install
-```
-
-### Database Setup
-
-```bash
-npx prisma generate
-npx prisma migrate dev
-```
-
-### Start Frontend
+Start the full local app:
 
 ```bash
 npm run dev
-```
-
-### Start Backend
-
-```bash
-npm run server:dev
 ```
 
 Frontend:
@@ -287,12 +337,46 @@ http://localhost:5173
 Backend:
 
 ```text
-http://localhost:5000
+http://localhost:4000
 ```
 
----
+Default demo login:
 
-## Testing
+```text
+Email: admin@momentra.app
+Password: momentra123
+```
+
+Additional local test users:
+
+```text
+admin@example.com / password123
+photographer@example.com / password123
+member@example.com / password123
+viewer@example.com / password123
+```
+
+## Environment Variables
+
+Create a `.env` file for production-style configuration:
+
+```env
+PORT=4000
+WEB_ORIGIN=http://localhost:5173
+JWT_SECRET=replace-with-a-secure-secret
+DATABASE_URL=postgresql://user:password@localhost:5432/momentra
+
+AWS_REGION=ap-south-1
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+S3_BUCKET_ORIGINALS=momentra-originals
+CLOUDFRONT_URL=https://your-cloudfront-domain
+REKOGNITION_COLLECTION_ID=momentra-faces
+```
+
+For local demo mode, the app can run without AWS credentials and will use local storage.
+
+## Useful Commands
 
 Run tests:
 
@@ -300,42 +384,57 @@ Run tests:
 npm test
 ```
 
-or
+Build frontend:
 
 ```bash
-npm run test
+npm run build
 ```
 
-Test coverage includes:
+Run backend only:
 
-- Authentication
-- Events
-- Albums
-- Uploads
-- Search
-- Permissions
-- Notifications
+```bash
+npm run server:dev
+```
 
----
+Generate Prisma client:
 
-## Security
+```bash
+npx prisma generate
+```
 
-- JWT-based authentication
-- Role-based authorization
-- Secure file uploads
-- Signed URLs
-- Input validation
-- Protected APIs
-- Session management
+Run Prisma migration:
 
----
+```bash
+npx prisma migrate dev
+```
 
-## Future Enhancements
+## Documentation
 
-- Mobile application
-- AI-generated event highlights
-- OCR-based image search
-- Voice-based search
-- Multi-club collaboration
-- Event recommendation engine
-- Video summarization
+Additional submission documents are available in:
+
+- `docs/API.md`
+- `docs/ARCHITECTURE.md`
+- `docs/ARCHITECTURE_DIAGRAM.md`
+- `docs/DATABASE_SCHEMA.md`
+- `docs/PITCH_DECK.md`
+
+## Security Notes
+
+- JWT authentication protects private APIs.
+- Role-based middleware enforces Admin, Photographer, Club Member, and Viewer permissions.
+- Albums support public, private, and club-only visibility.
+- Uploads use validation and size limits.
+- Production deployments should use strong `JWT_SECRET`, HTTPS, real PostgreSQL, S3, and managed secrets.
+
+## Demo Focus
+
+Momentra is built to demonstrate:
+
+- A polished event media dashboard
+- End-to-end event and album management
+- Upload-to-gallery media workflows
+- Role-aware access control
+- Social media interactions
+- AI tagging and face search architecture
+- Cloud-ready storage and watermarking
+- Startup-quality product presentation

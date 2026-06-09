@@ -92,6 +92,7 @@ model MediaAsset {
   uploadedAt     DateTime    @default(now())
   tags           MediaTag[]
   faceTags       FaceTag[]
+  faceEmbeddings FaceEmbedding[]
   embeddings     AIEmbedding[]
   comments       Comment[]
   likes          Like[]
@@ -131,6 +132,22 @@ model FaceTag {
   faceVectorId String
   confidence   Float
   box          Json
+}
+
+model FaceEmbedding {
+  id             String     @id @default(cuid())
+  mediaId        String
+  media          MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  provider       String
+  providerFaceId String?
+  embedding      Json?
+  box            Json?
+  confidence     Float
+  createdAt      DateTime   @default(now())
+
+  @@index([mediaId])
+  @@index([provider])
+  @@index([providerFaceId])
 }
 
 model Comment {

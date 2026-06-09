@@ -653,7 +653,7 @@ h2 {
 }
 
 .media-actions button {
-  width: 22px;
+  width: 24px;
   height: 22px;
   display: grid;
   place-items: center;
@@ -661,6 +661,10 @@ h2 {
   color: #fff;
   background: transparent;
   padding: 0;
+}
+
+.media-actions button.danger-action {
+  color: #ffb3c1;
 }
 
 .ai-grid {
@@ -825,10 +829,45 @@ h2 {
   box-shadow: 0 14px 40px rgba(0,0,0,.24);
   color: var(--text);
   text-align: left;
+  pointer-events: auto;
+  justify-content: space-between;
 }
 
 .toast.read {
   opacity: .55;
+}
+
+.toast-main,
+.toast-close {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+}
+
+.toast-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.toast-main span {
+  overflow-wrap: anywhere;
+}
+
+.toast-close {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.toast-close:hover {
+  background: rgba(255,255,255,.12);
 }
 
 .fab-stack {

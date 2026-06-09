@@ -399,6 +399,16 @@ function GalleryPanel({ title, items, setItems, setLightbox, notify }) {
   async function updateMedia(next) {
     setItems((current) => current.map((item) => item.id === next.id ? next : item));
   }
+  async function removeMedia(item) {
+    setItems((current) => current.filter((entry) => entry.id !== item.id));
+    try {
+      await api.patch(`/api/media/${item.id}/trash`, {});
+      notify("Photo removed from album");
+    } catch (error) {
+      setItems((current) => [item, ...current]);
+      notify(error.message, "error");
+    }
+  }
   async function like(item) {
     updateMedia({ ...item, liked: !item.liked, likes: item.likes + (item.liked ? -1 : 1) });
     try { updateMedia(await api.post(`/api/media/${item.id}/like`)); } catch (error) { notify(error.message, "error"); }
@@ -414,7 +424,7 @@ function GalleryPanel({ title, items, setItems, setLightbox, notify }) {
         {items.map((item) => (
           <motion.article className="media-card" key={item.id} whileHover={{ scale: 1.018 }}>
             <button onClick={() => setLightbox({ ...item, onUpdate: updateMedia })} type="button"><img src={mediaUrl(item.thumbnailUrl ?? item.url)} alt={item.caption} loading="lazy" />{item.type === "VIDEO" && <span className="play-badge"><Play size={16} /></span>}</button>
-            <div className="media-overlay"><div><strong>{item.caption}</strong><span>{item.tags.join(" • ")}</span></div><div className="media-actions"><button onClick={() => like(item)}><Heart size={16} fill={item.liked ? "currentColor" : "none"} /></button><button onClick={() => setLightbox({ ...item, focusComments: true, onUpdate: updateMedia })}><MessageCircle size={16} /></button><button onClick={() => save(item)}><Bookmark size={16} fill={item.saved ? "currentColor" : "none"} /></button></div></div>
+            <div className="media-overlay"><div><strong>{item.caption}</strong><span>{item.albumName && item.eventName ? `${item.eventName} • ${item.albumName}` : item.tags.join(" • ")}</span></div><div className="media-actions"><button aria-label="Like media" onClick={() => like(item)}><Heart size={16} fill={item.liked ? "currentColor" : "none"} /></button><button aria-label="Comment on media" onClick={() => setLightbox({ ...item, focusComments: true, onUpdate: updateMedia })}><MessageCircle size={16} /></button><button aria-label="Save media" onClick={() => save(item)}><Bookmark size={16} fill={item.saved ? "currentColor" : "none"} /></button><button className="danger-action" aria-label="Remove media from album" onClick={() => removeMedia(item)}><Trash2 size={16} /></button></div></div>
           </motion.article>
         ))}
       </div>
@@ -565,15 +575,27 @@ function Architecture() {
 }
 
 function NotificationDock({ notifications, notify }) {
-  return <aside className="notification-dock">{notifications.slice(0, 3).map((notice) => <NotificationToast key={notice.id} notice={notice} notify={notify} />)}</aside>;
+  const [dismissed, setDismissed] = useState([]);
+  const visible = notifications.filter((notice) => !notice.readAt && !dismissed.includes(notice.id)).slice(0, 3);
+
+  useEffect(() => {
+    if (!visible.length) return undefined;
+    const timers = visible.map((notice) => window.setTimeout(() => {
+      setDismissed((current) => current.includes(notice.id) ? current : [...current, notice.id]);
+    }, 4000));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [visible.map((notice) => notice.id).join("|")]);
+
+  return <aside className="notification-dock">{visible.map((notice) => <NotificationToast key={notice.id} notice={notice} notify={notify} onDismiss={() => setDismissed((current) => current.includes(notice.id) ? current : [...current, notice.id])} />)}</aside>;
 }
 
-function NotificationToast({ notice, notify }) {
+function NotificationToast({ notice, notify, onDismiss }) {
   async function markRead() {
     await api.post(`/api/notifications/${notice.id}/read`);
     notify("Notification marked read");
+    onDismiss();
   }
-  return <motion.button className={`toast ${notice.readAt ? "read" : ""}`} onClick={markRead} initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }}><Bell size={16} /><span>{notice.text}</span></motion.button>;
+  return <motion.div className={`toast ${notice.readAt ? "read" : ""}`} initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 24, opacity: 0 }}><button className="toast-main" onClick={markRead}><Bell size={16} /><span>{notice.text}</span></button><button className="toast-close" aria-label="Dismiss notification" onClick={onDismiss}><X size={15} /></button></motion.div>;
 }
 
 function NotificationRow({ notice }) {

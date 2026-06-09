@@ -15,7 +15,7 @@ import { z } from "zod";
 import { canAccessAlbum, requireAuth, requireRole, signAccess, signRefresh, verifyToken } from "./auth.js";
 import { emit, attachRealtime } from "./realtime.js";
 import { enrichMedia, eventStats, id, now, publicUser, readDb, roleRank, transact } from "./db.js";
-import { faceEmbedding, semanticScore, similarity, tagImage } from "./services/aiService.js";
+import { extractLocalFaceEmbeddings, faceCollectionHealth, faceProviderStatus, findFaceMatches, indexFacesForMedia, searchFacesByReference, semanticScore, tagImage } from "./services/aiService.js";
 import { analyzeImage, applyWatermark, createDerivatives } from "./services/imageService.js";
 import { getObjectBuffer, putObject, signedReadUrl, signedWriteUrl, storageMode } from "./services/storageService.js";
 
@@ -91,6 +91,30 @@ function computeAnalytics(db) {
     { label: "Processing", value: `${Math.round((complete / Math.max(1, activeMedia.length)) * 100)}%`, delta: "AI queue health" },
     { label: "Storage used", value: `${storageMb.toFixed(1)}MB`, delta: "compressed derivatives" }
   ];
+}
+
+function faceRecordsFor(item) {
+  return Array.isArray(item.faceEmbeddings) ? item.faceEmbeddings : [];
+}
+
+function faceIndexEvidence(db, item) {
+  const album = db.albums.find((entry) => entry.id === item.albumId);
+  const event = db.events.find((entry) => entry.id === item.eventId);
+  const records = faceRecordsFor(item);
+  return {
+    mediaId: item.id,
+    fileName: item.fileName,
+    albumId: item.albumId,
+    albumName: album?.title ?? null,
+    eventId: item.eventId,
+    eventName: event?.name ?? null,
+    facesDetected: records.length,
+    embeddingCreated: records.some((face) => Array.isArray(face.embedding)) || records.some((face) => face.providerFaceId),
+    embeddingDimension: records.find((face) => Array.isArray(face.embedding))?.embedding?.length ?? (records.some((face) => face.providerFaceId) ? "provider-managed" : 0),
+    providerFaceIds: records.map((face) => face.providerFaceId).filter(Boolean),
+    legacyHashPresent: Boolean(item.faceEmbedding),
+    indexed: records.length > 0
+  };
 }
 
 app.get("/health", (_req, res) => {
@@ -400,7 +424,7 @@ app.post("/api/uploads", requireAuth, requireRole("PHOTOGRAPHER"), upload.array(
         aiCaption: ai.caption,
         tags: ai.tags,
         faces: [],
-        faceEmbedding: isImage ? await faceEmbedding(file.buffer) : null,
+        faceEmbeddings: [],
         duplicateScore: 0,
         moderationStatus: ai.moderationStatus,
         metadata: { sizeMb: Number((file.size / 1024 / 1024).toFixed(2)), mimeType: file.mimetype, width: imageMetadata.width, height: imageMetadata.height, storageKey: originalKey, optimizedKey, thumbnailKey },
@@ -410,6 +434,13 @@ app.post("/api/uploads", requireAuth, requireRole("PHOTOGRAPHER"), upload.array(
         updatedAt: now(),
         deletedAt: null
       };
+      if (isImage) {
+        const faceIndex = await indexFacesForMedia({ buffer: file.buffer, mediaId: item.id });
+        const faceRecords = faceIndex.records ?? [];
+        item.faceEmbeddings = faceRecords;
+        item.faces = faceRecords.map((face) => face.providerFaceId).filter(Boolean);
+        item.processing.faceIndex = faceIndex.diagnostics;
+      }
       const duplicate = db.media.find((existing) => existing.embedding && existing.embedding === item.embedding);
       if (duplicate) item.duplicateScore = 1;
       db.media.unshift(item);
@@ -622,13 +653,210 @@ app.post("/api/ai/find-my-photos", requireAuth, upload.single("selfie"), asyncRo
   if (!req.file) return res.status(400).json({ error: "Selfie upload is required" });
   const db = await readDb();
   const user = userFromDb(db, req);
-  const reference = await faceEmbedding(req.file.buffer);
-  const data = db.media
-    .filter((item) => !item.deletedAt && item.faceEmbedding)
-    .map((item) => ({ ...enrichMedia(db, item, user.id), matchScore: similarity(reference, item.faceEmbedding), referenceFaceId: reference.slice(0, 16) }))
-    .filter((item) => item.matchScore >= 45)
+  const threshold = Math.max(0.1, Math.min(0.99, Number(req.body.threshold ?? 0.8)));
+  const targetAlbumId = req.body.albumId ? String(req.body.albumId) : null;
+  const providerResult = await searchFacesByReference({ buffer: req.file.buffer, threshold: threshold * 100 });
+  if (providerResult) {
+    const byMedia = new Map();
+    for (const match of providerResult.matches) {
+      if (!match.mediaId) continue;
+      const current = byMedia.get(match.mediaId);
+      if (!current || current.similarity < match.similarity) byMedia.set(match.mediaId, match);
+    }
+    const data = [...byMedia.entries()]
+      .map(([mediaId, match]) => {
+        const item = db.media.find((entry) => entry.id === mediaId && !entry.deletedAt);
+        if (!item) return null;
+        if (targetAlbumId && item.albumId !== targetAlbumId) return null;
+        const album = db.albums.find((entry) => entry.id === item.albumId);
+        if (!album || !canAccessAlbum(user.role, album.visibility)) return null;
+        const event = db.events.find((entry) => entry.id === item.eventId);
+        return {
+          ...enrichMedia(db, item, user.id),
+          matchScore: Math.round(match.similarity * 100),
+          matchPercentage: Math.round(match.similarity * 100),
+          faceConfidence: Math.round(match.confidence),
+          albumName: album.title,
+          eventName: event?.name
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.matchScore - a.matchScore);
+    return res.json({
+      provider: "aws-rekognition",
+      threshold,
+      query: {
+        queryFaceDetected: providerResult.queryFaceDetected,
+        embeddingGenerated: providerResult.embeddingGenerated,
+        embeddingDimension: providerResult.embeddingDimension,
+        error: providerResult.error
+      },
+      matchesFound: data.length,
+      similarityScores: providerResult.matches.map((match) => ({
+        mediaId: match.mediaId,
+        providerFaceId: match.providerFaceId,
+        similarity: Number(match.similarity.toFixed(4)),
+        confidence: Number(match.confidence.toFixed(2))
+      })),
+      data
+    });
+  }
+
+  const storedFaces = db.media.flatMap((item) => (item.faceEmbeddings ?? [])
+    .filter(() => !targetAlbumId || item.albumId === targetAlbumId)
+    .filter((face) => Array.isArray(face.embedding))
+    .map((face) => ({ ...face, mediaId: item.id })));
+  if (!storedFaces.length) {
+    return res.status(422).json({ error: "No indexed face embeddings are available yet. Upload face photos or run POST /api/ai/reindex-faces first." });
+  }
+  const queryFaces = await extractLocalFaceEmbeddings({ buffer: req.file.buffer });
+  if (!queryFaces.length) {
+    return res.json({
+      provider: "face-api.js",
+      threshold,
+      query: { queryFaceDetected: false, embeddingGenerated: false, embeddingDimension: 0 },
+      matchesFound: 0,
+      similarityScores: [],
+      data: []
+    });
+  }
+  const matches = queryFaces.flatMap((queryFace) => findFaceMatches({
+    queryEmbedding: queryFace.embedding,
+    storedFaces,
+    threshold
+  }).map((match) => ({ ...match, queryFace })));
+  const byMedia = new Map();
+  for (const match of matches) {
+    const current = byMedia.get(match.mediaId);
+    if (!current || current.similarity < match.similarity) byMedia.set(match.mediaId, match);
+  }
+  const data = [...byMedia.entries()]
+    .map(([mediaId, match]) => {
+      const item = db.media.find((entry) => entry.id === mediaId && !entry.deletedAt);
+      if (!item) return null;
+      if (targetAlbumId && item.albumId !== targetAlbumId) return null;
+      const album = db.albums.find((entry) => entry.id === item.albumId);
+      if (!album || !canAccessAlbum(user.role, album.visibility)) return null;
+      const event = db.events.find((entry) => entry.id === item.eventId);
+      return {
+        ...enrichMedia(db, item, user.id),
+        matchScore: Math.round(match.similarity * 100),
+        matchPercentage: Math.round(match.similarity * 100),
+        faceConfidence: Math.round(match.confidence),
+        albumName: album.title,
+        eventName: event?.name
+      };
+    })
+    .filter(Boolean)
     .sort((a, b) => b.matchScore - a.matchScore);
-  res.json({ referenceFaceId: reference.slice(0, 16), data });
+  return res.json({
+    provider: "face-api.js",
+    threshold,
+    query: {
+      queryFaceDetected: true,
+      embeddingGenerated: true,
+      embeddingDimension: queryFaces[0].embedding.length,
+      facesDetected: queryFaces.length
+    },
+    matchesFound: data.length,
+    similarityScores: [...byMedia.values()].map((match) => ({
+      mediaId: match.mediaId,
+      providerFaceId: match.providerFaceId,
+      similarity: Number(match.similarity.toFixed(4)),
+      confidence: Number(match.confidence.toFixed(2))
+    })).sort((a, b) => b.similarity - a.similarity),
+    data
+  });
+}));
+
+app.get("/api/ai/face-health", requireAuth, requireRole("PHOTOGRAPHER"), asyncRoute(async (_req, res) => {
+  const db = await readDb();
+  const health = await faceCollectionHealth();
+  const mediaFaceRecords = db.media.reduce((sum, item) => sum + faceRecordsFor(item).length, 0);
+  res.json({
+    provider: health.provider ? "AWS Rekognition" : null,
+    configured: health.configured,
+    collectionExists: health.collectionExists,
+    indexedFaces: health.indexedFaces,
+    embeddingsStored: mediaFaceRecords,
+    providerIndexedFaces: health.indexedFaces,
+    searchEnabled: health.searchEnabled && mediaFaceRecords > 0,
+    env: health.env,
+    checks: health.checks
+  });
+}));
+
+app.get("/api/ai/face-debug", requireAuth, requireRole("PHOTOGRAPHER"), asyncRoute(async (req, res) => {
+  const db = await readDb();
+  const user = userFromDb(db, req);
+  const allowedAlbums = new Set(db.albums.filter((album) => canAccessAlbum(user.role, album.visibility)).map((album) => album.id));
+  const media = db.media.filter((item) => !item.deletedAt && item.type === "PHOTO" && allowedAlbums.has(item.albumId));
+  const evidence = media.map((item) => faceIndexEvidence(db, item));
+  const totalEmbeddings = evidence.reduce((sum, item) => sum + item.facesDetected, 0);
+  const providerIds = evidence.flatMap((item) => item.providerFaceIds);
+  res.json({
+    provider: faceProviderStatus(),
+    totals: {
+      media: media.length,
+      faceEmbeddingRecords: totalEmbeddings,
+      indexedMedia: evidence.filter((item) => item.indexed).length,
+      legacyHashRecords: media.filter((item) => item.faceEmbedding).length,
+      providerFaceIds: providerIds.length,
+      vectorEmbeddings: media.reduce((sum, item) => sum + faceRecordsFor(item).filter((face) => Array.isArray(face.embedding)).length, 0)
+    },
+    media: evidence
+  });
+}));
+
+app.post("/api/ai/reindex-faces", requireAuth, requireRole("PHOTOGRAPHER"), asyncRoute(async (req, res) => {
+  const provider = faceProviderStatus();
+  if (!provider.configured) {
+    return res.status(501).json({
+      error: "AWS Rekognition is not configured. Set AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and REKOGNITION_COLLECTION_ID, then restart the server.",
+      provider
+    });
+  }
+
+  const targetAlbumId = req.body?.albumId ? String(req.body.albumId) : null;
+  const result = await transact(async (db) => {
+    const user = userFromDb(db, req);
+    const allowedAlbums = new Set(db.albums.filter((album) => canAccessAlbum(user.role, album.visibility)).map((album) => album.id));
+    const targets = db.media
+      .filter((item) => !item.deletedAt && item.type === "PHOTO" && allowedAlbums.has(item.albumId))
+      .filter((item) => !targetAlbumId || item.albumId === targetAlbumId);
+    const indexed = [];
+    for (const item of targets) {
+      const key = item.originalKey ?? item.metadata?.storageKey;
+      if (!key) {
+        indexed.push({ ...faceIndexEvidence(db, item), skipped: true, reason: "No stored original key is available for reindexing" });
+        continue;
+      }
+      try {
+        const buffer = await getObjectBuffer({ key, localRoot: uploadDir });
+        const faceIndex = await indexFacesForMedia({ buffer, mediaId: item.id });
+        item.faceEmbeddings = faceIndex.records ?? [];
+        item.faces = item.faceEmbeddings.map((face) => face.providerFaceId).filter(Boolean);
+        item.processing = { ...item.processing, faceIndex: faceIndex.diagnostics };
+        item.updatedAt = now();
+        indexed.push({
+          ...faceIndexEvidence(db, item),
+          reindexed: true,
+          diagnostics: faceIndex.diagnostics
+        });
+      } catch (error) {
+        indexed.push({ ...faceIndexEvidence(db, item), reindexed: false, error: error.message });
+      }
+    }
+    return indexed;
+  });
+
+  emit("ai:faces-reindexed", result);
+  res.json({
+    provider,
+    totalProcessed: result.length,
+    totalFaceEmbeddingRecords: result.reduce((sum, item) => sum + item.facesDetected, 0),
+    media: result
+  });
 }));
 
 app.get("/api/users", requireAuth, requireRole("ADMIN"), asyncRoute(async (_req, res) => {
@@ -696,6 +924,7 @@ if (existsSync(distDir)) {
   });
 }
 
-server.listen(port, "127.0.0.1", () => {
-  console.log(`Momentra API listening on http://localhost:${port}`);
+const host = process.env.HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
+server.listen(port, host, () => {
+  console.log(`Momentra API listening on http://${host}:${port}`);
 });

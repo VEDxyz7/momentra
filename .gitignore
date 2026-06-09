@@ -6,3 +6,4 @@ dist
 coverage
 server/data
 server/uploads
+tests/fixtures
